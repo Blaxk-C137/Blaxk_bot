@@ -1,0 +1,14 @@
+{
+  "name": "whatsapp-bot",
+  "version": "1.0.0",
+  "description": "A WhatsApp bot using Baileys that persists session and listens for incoming messages.",
+  "main": "src/bot.js",
+  "scripts": {
+    "start": "node src/bot.js"
+  },
+  "dependencies": {
+    "@adiwajshing/baileys": "^4.4.0"
+  },
+  "author": "",
+  "license": "ISC"
+}
