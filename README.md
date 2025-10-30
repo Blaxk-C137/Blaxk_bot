@@ -50,3 +50,7 @@ Once the bot is running, you can interact with it by sending messages in WhatsAp
 ## Future Enhancements
 
 This bot is designed to be easily extendable. Additional commands and features can be implemented in the `src/commands/index.js` file.
+
+# Blaxk_bot
+A whatsapp bot that i developed using JavaScript and baileys library 
+47dc032d034facbc7dc0ae8c87b5b716e2bd11da
