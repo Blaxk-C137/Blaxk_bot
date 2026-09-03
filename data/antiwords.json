@@ -1,0 +1,9 @@
+{
+  "g2@g.us": {
+    "enabled": true,
+    "action": "warn",
+    "words": [
+      "idiot"
+    ]
+  }
+}
