@@ -1,14 +1,18 @@
 {
   "name": "whatsapp-bot",
-  "version": "1.0.0",
-  "description": "A WhatsApp bot using Baileys that persists session and listens for incoming messages.",
+  "version": "2.0.0",
+  "description": "BlaxkBot — a WhatsApp group-management bot built on Baileys.",
   "main": "src/bot.js",
   "scripts": {
     "start": "node src/bot.js"
   },
   "dependencies": {
-    "@adiwajshing/baileys": "^4.4.0"
+    "@whiskeysockets/baileys": "^6.7.24",
+    "pino": "^9.6.0",
+    "qrcode-terminal": "^0.12.0",
+    "sharp": "^0.33.5",
+    "ws": "^8.18.3"
   },
-  "author": "",
+  "author": "Blaxk999",
   "license": "ISC"
 }

@@ -1,10 +1,12 @@
 const fs = require('fs');
 const path = require('path');
+const sharp = require('sharp');
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const jidUtils = require('../jidUtils');
+const { handleFunCommand } = require('./fun');
 const linkDeleteGroups = new Set();
 const userWarns = {}; // { [groupJid]: { [userJid]: warnCount } }
-const { activityCounts } = require('../bot');
+const { activityCounts } = require('../activity');
 
 // === OWNER JID PERSISTENCE ===
 const OWNER_FILE = path.resolve(__dirname, 'owner.json');
@@ -176,14 +178,45 @@ function getRandomImage() {
 }
 
 // === EVIL PAYLOADS ===
+// Bidi-override abuse: RLO/LRO + isolate chars make clients render the text
+// in a scrambled order — classic "text looks reversed/corrupted" prank.
 function generateOverrideAbuse() {
-    return 'Normal text \u202e Reordered text \u202c (limited RTL override)';
+    const RLO = '‮'; // right-to-left override
+    const LRO = '‭'; // left-to-right override
+    const PDF = '‬'; // pop directional formatting (ends the override)
+    const FSI = '⁦'; // first strong isolate
+    const PDI = '⁩'; // pop directional isolate
+    return (
+        `Normal text ${RLO}reversed looking text${PDF} normal again\n` +
+        `${FSI}isolated fragment${PDI} after isolate\n` +
+        `${RLO}BlaxkBot${PDF} ${LRO}was${PDF} ${RLO}here${PDF}`
+    );
 }
+
+// Simulated "nuke": one message stuffed with a wall of emoji + zero-width
+// fillers so it renders as a massive glitchy block.
 function generateNukePayload() {
-    return '🚨 [Simulated Nuke] ' + 'X'.repeat(500);
+    const ZWSP = '​'; // zero-width space — invisible, pads length
+    let payload = '🚨 [SIMULATED NUKE] 🚨\n';
+    payload += '👹'.repeat(100) + '\n';
+    payload += ('💥' + ZWSP).repeat(100) + '\n';
+    payload += '☠️ BLAXKBOT STRIKE ☠️\n';
+    payload += 'X'.repeat(500);
+    return payload;
 }
+
+// HTML junk: WhatsApp shows this as raw text, but the tag soup looks like a
+// broken page dump in the chat.
 function generateHtmlJunk() {
-    return '<div style="font-size: 100px;">' + 'X'.repeat(100) + '</div>';
+    const attrs = 'style="font-size:100px;color:red;position:fixed;top:0;left:0"';
+    return (
+        `<div ${attrs}>\n` +
+        `  <h1>` + 'X'.repeat(60) + `</h1>\n` +
+        `  <marquee><blink>BLAXKBOT</blink></marquee>\n` +
+        `  <script>alert('x'.repeat(50))</script>\n` +
+        `  <img src="` + 'x'.repeat(100) + `" onerror="infiniteLoop()">\n` +
+        `</div>`
+    );
 }
 
 // === GROUP ADMIN HELPER ===
@@ -370,7 +403,11 @@ async function handleCommand(sock, msg, text, version) {
 
     // === BASIC USER FUNCTION RESTRICTION ===
     const basicCommands = [
-        '.ping', '.help', '.uptime', '.count', '.vv', '.lagchat', '.flood', '.spam', '.htmljunk', '.override', '.nuke', '.bugbot', '.greet'
+        '.ping', '.help', '.uptime', '.count', '.vv', '.sticker', '.poll', '.greet',
+        '.htmljunk', '.override', '.nuke', '.bugbot',
+        '.truth', '.dare', '.wyr', '.trivia', '.roulette',
+        '.8ball', '.flip', '.dice', '.rate', '.ship', '.pick', '.joke', '.quote', '.fact',
+        '.fancy', '.zalgo', '.meme'
     ];
     if (isBasicUser(sender)) {
         if (!basicCommands.some(cmd => command.startsWith(cmd))) {
@@ -506,6 +543,149 @@ async function handleCommand(sock, msg, text, version) {
         }
     }
 
+    // === TAG ALL MEMBERS (admin/activator only) ===
+    else if (command === '.tagall') {
+        if (!jidUtils.isGroupJid(from)) return send('❌ This command is for groups only.');
+        let isActivator = groupActivators[from] && jidUtils.bareJid(sender) === groupActivators[from];
+        let isAdmin = await isGroupAdmin(sock, from, sender);
+        if (!isActivator && !isAdmin) return send('❌ Only group admins or group activator can use this command.');
+        const metadata = await sock.groupMetadata(from);
+        const mentions = metadata.participants.map(p => p.id);
+        await sock.sendMessage(from, {
+            text: '👥 Tagging all group members:\n' + mentions.map(jid => mentionTag(jid)).join(' '),
+            mentions
+        });
+    }
+
+    // === BROADCAST MESSAGE TO ALL MEMBERS (admin/activator only) ===
+    else if (command.startsWith('.broadcast')) {
+        if (!jidUtils.isGroupJid(from)) return send('❌ This command is for groups only.');
+        let isActivator = groupActivators[from] && jidUtils.bareJid(sender) === groupActivators[from];
+        let isAdmin = await isGroupAdmin(sock, from, sender);
+        if (!isActivator && !isAdmin) return send('❌ Only group admins or group activator can use this command.');
+        const message = text.replace(/^\.broadcast\s*/i, '').trim();
+        if (!message) return send('Usage: .broadcast <your message>');
+        const metadata = await sock.groupMetadata(from);
+        const mentions = metadata.participants.map(p => p.id);
+        await sock.sendMessage(from, {
+            text: `📢 *Broadcast from admin/activator:*\n${message}`,
+            mentions
+        });
+    }
+
+    // === LIST GROUP ADMINS ===
+    else if (command === '.admins') {
+        if (!jidUtils.isGroupJid(from)) return send('❌ This command is for groups only.');
+        const metadata = await sock.groupMetadata(from);
+        const admins = metadata.participants.filter(p => p.admin);
+        if (admins.length === 0) return send('No admins found in this group.');
+        await sock.sendMessage(from, {
+            text: '👑 Group Admins:\n' + admins.map(p => mentionTag(p.id)).join('\n'),
+            mentions: admins.map(p => p.id)
+        });
+    }
+
+    // === GROUP INFO ===
+    else if (command === '.info') {
+        if (!jidUtils.isGroupJid(from)) return send('❌ This command is for groups only.');
+        const metadata = await sock.groupMetadata(from);
+        send(
+            `*Group Info:*\n` +
+            `Name: ${metadata.subject}\n` +
+            `Description: ${metadata.desc || 'No description'}\n` +
+            `Members: ${metadata.participants.length}\n` +
+            `Admins: ${metadata.participants.filter(p => p.admin).length}`
+        );
+    }
+
+    // === SET GROUP DESCRIPTION (admin/activator only) ===
+    else if (command.startsWith('.setdesc')) {
+        if (!jidUtils.isGroupJid(from)) return send('❌ This command is for groups only.');
+        let isActivator = groupActivators[from] && jidUtils.bareJid(sender) === groupActivators[from];
+        let isAdmin = await isGroupAdmin(sock, from, sender);
+        if (!isActivator && !isAdmin) return send('❌ Only group admins or group activator can use this command.');
+        const desc = text.replace(/^\.setdesc\s*/i, '').trim();
+        if (!desc) return send('Usage: .setdesc <description>');
+        try {
+            await sock.groupUpdateDescription(from, desc);
+            send('📝 Group description updated.');
+        } catch (err) {
+            await sock.sendMessage(from, { text: `❌ Failed to set description: ${err.message}` });
+        }
+    }
+
+    // === SET GROUP NAME (admin/activator only) ===
+    else if (command.startsWith('.setsubject')) {
+        if (!jidUtils.isGroupJid(from)) return send('❌ This command is for groups only.');
+        let isActivator = groupActivators[from] && jidUtils.bareJid(sender) === groupActivators[from];
+        let isAdmin = await isGroupAdmin(sock, from, sender);
+        if (!isActivator && !isAdmin) return send('❌ Only group admins or group activator can use this command.');
+        const subject = text.replace(/^\.setsubject\s*/i, '').trim();
+        if (!subject) return send('Usage: .setsubject <name>');
+        try {
+            await sock.groupUpdateSubject(from, subject);
+            send('🏷️ Group name updated.');
+        } catch (err) {
+            await sock.sendMessage(from, { text: `❌ Failed to set group name: ${err.message}` });
+        }
+    }
+
+    // === GET GROUP INVITE LINK (admin/activator only) ===
+    else if (command === '.invite') {
+        if (!jidUtils.isGroupJid(from)) return send('❌ This command is for groups only.');
+        let isActivator = groupActivators[from] && jidUtils.bareJid(sender) === groupActivators[from];
+        let isAdmin = await isGroupAdmin(sock, from, sender);
+        if (!isActivator && !isAdmin) return send('❌ Only group admins or group activator can use this command.');
+        try {
+            const code = await sock.groupInviteCode(from);
+            send(`🔗 Group invite link:\nhttps://chat.whatsapp.com/${code}`);
+        } catch (err) {
+            await sock.sendMessage(from, { text: `❌ Failed to get invite link: ${err.message}` });
+        }
+    }
+
+    // === REVOKE GROUP INVITE LINK (admin/activator only) ===
+    else if (command === '.revoke') {
+        if (!jidUtils.isGroupJid(from)) return send('❌ This command is for groups only.');
+        let isActivator = groupActivators[from] && jidUtils.bareJid(sender) === groupActivators[from];
+        let isAdmin = await isGroupAdmin(sock, from, sender);
+        if (!isActivator && !isAdmin) return send('❌ Only group admins or group activator can use this command.');
+        try {
+            await sock.groupRevokeInvite(from);
+            send('♻️ Group invite link revoked.');
+        } catch (err) {
+            await sock.sendMessage(from, { text: `❌ Failed to revoke invite link: ${err.message}` });
+        }
+    }
+
+    // === LOCK CHAT — only admins can send (admin/activator only) ===
+    else if (command === '.lockchat') {
+        if (!jidUtils.isGroupJid(from)) return send('❌ This command is for groups only.');
+        let isActivator = groupActivators[from] && jidUtils.bareJid(sender) === groupActivators[from];
+        let isAdmin = await isGroupAdmin(sock, from, sender);
+        if (!isActivator && !isAdmin) return send('❌ Only group admins or group activator can use this command.');
+        try {
+            await sock.groupSettingUpdate(from, 'announcement');
+            send('🔒 Chat locked! Only admins can send messages.');
+        } catch (err) {
+            await sock.sendMessage(from, { text: `❌ Failed to lock chat: ${err.message}` });
+        }
+    }
+
+    // === UNLOCK CHAT — everyone can send (admin/activator only) ===
+    else if (command === '.unlockchat') {
+        if (!jidUtils.isGroupJid(from)) return send('❌ This command is for groups only.');
+        let isActivator = groupActivators[from] && jidUtils.bareJid(sender) === groupActivators[from];
+        let isAdmin = await isGroupAdmin(sock, from, sender);
+        if (!isActivator && !isAdmin) return send('❌ Only group admins or group activator can use this command.');
+        try {
+            await sock.groupSettingUpdate(from, 'not_announcement');
+            send('🔓 Chat unlocked! Everyone can send messages.');
+        } catch (err) {
+            await sock.sendMessage(from, { text: `❌ Failed to unlock chat: ${err.message}` });
+        }
+    }
+
     // === VIEW-ONCE UNLOCK (reply required) ===
     else if (command === '.vv') {
         try {
@@ -553,6 +733,68 @@ async function handleCommand(sock, msg, text, version) {
         }
     }
 
+    // === STICKER COMMAND (reply to an image or video) ===
+    else if (command === '.sticker') {
+        const context = msg.message?.extendedTextMessage?.contextInfo;
+        let quoted = context?.quotedMessage;
+        if (!quoted) return send('❌ Reply to an image or short video with .sticker.');
+        if (quoted?.viewOnceMessage?.message) quoted = quoted.viewOnceMessage.message;
+
+        try {
+            if (quoted?.imageMessage) {
+                const stream = await downloadContentFromMessage(quoted.imageMessage, 'image');
+                let buffer = Buffer.from([]);
+                for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+                const webp = await sharp(buffer)
+                    .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+                    .webp({ quality: 90 })
+                    .toBuffer();
+                await sock.sendMessage(from, { sticker: webp });
+            } else if (quoted?.videoMessage) {
+                // Animated sticker: convert the video to animated webp via ffmpeg
+                const stream = await downloadContentFromMessage(quoted.videoMessage, 'video');
+                let buffer = Buffer.from([]);
+                for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+                const os = require('os');
+                const tmpIn = path.join(os.tmpdir(), `blaxk_${Date.now()}.in`);
+                const tmpOut = tmpIn + '.webp';
+                fs.writeFileSync(tmpIn, buffer);
+                try {
+                    const { execFileSync } = require('child_process');
+                    execFileSync('ffmpeg', [
+                        '-y', '-i', tmpIn, '-vcodec', 'libwebp', '-an',
+                        '-vf', 'fps=12,scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:-1:-1:color=black@0',
+                        '-lossless', '0', '-q:v', '70', '-loop', '0', tmpOut
+                    ], { stdio: 'ignore', timeout: 60000 });
+                    await sock.sendMessage(from, { sticker: fs.readFileSync(tmpOut) });
+                } finally {
+                    fs.rmSync(tmpIn, { force: true });
+                    fs.rmSync(tmpOut, { force: true });
+                }
+            } else {
+                return send('❌ Reply to an image or video with .sticker.');
+            }
+        } catch (err) {
+            console.error('❌ Sticker error:', err);
+            send('⚠️ Failed to create sticker. (Video stickers require ffmpeg to be installed.)');
+        }
+    }
+
+    // === POLL COMMAND ===
+    else if (command.startsWith('.poll')) {
+        const body = text.replace(/^\.poll\s*/i, '').trim();
+        if (!body) return send('Usage: .poll Question | Option 1 | Option 2');
+        const parts = body.split('|').map(s => s.trim()).filter(Boolean);
+        if (parts.length < 3) return send('❌ Format: .poll Question | Option 1 | Option 2 (at least 2 options).');
+        const [name, ...values] = parts;
+        try {
+            await sock.sendMessage(from, { poll: { name, values, selectableCount: 1 } });
+        } catch (err) {
+            console.error('❌ Poll error:', err);
+            send(`❌ Failed to create poll: ${err.message}`);
+        }
+    }
+
     // === INFO COMMANDS ===
     else if (command === '.ping') {
         const caption = `🤖 *BlaxkBot is alive!*
@@ -570,50 +812,61 @@ async function handleCommand(sock, msg, text, version) {
 .ping - Show bot status and info
 .help - Show this help message
 .uptime - Show bot uptime
-.restart - Simulate bot restart
-.crash - Simulate crash payload
-.lagchat - Send laggy messages
-.flood - Flood chat with messages
-.spam <count> <msg> - Spam a message
 .vv - Unhide view-once media (reply to media)
-.bugbot - Bugbot test
-.override - Unicode override abuse
-.nuke - Simulated WhatsApp nuke
-.htmljunk - Send HTML junk (for fun)
+.sticker - Create a sticker from an image or video (reply to media)
+.poll Question | Option 1 | Option 2 - Create a poll
 .greet - Greet a user (reply or mention)
 .count - Count messages in this chat
 .add @user - Allow user to use bot (group activator only)
 .remove @user - Remove user from allowed list (group activator only)
+.crash - Crash payload
+.bugbot - Bugbot test
+.override - Unicode override abuse
+.nuke - Simulated WhatsApp nuke
+.htmljunk - Send HTML junk (for fun)
+
+*Fun & Games:*
+.truth - Random truth question (reply/mention to target someone)
+.dare - Random dare (reply/mention to target someone)
+.wyr - Would you rather...
+.trivia - Start a trivia round (first correct answer scores)
+.roulette - Russian roulette (simulation!)
+.8ball <question> - Ask the magic 8-ball
+.flip - Flip a coin
+.dice - Roll a dice
+.rate @user - Rate a user (deterministic!)
+.ship @user1 @user2 - Compatibility test
+.pick a | b | c - Let the bot choose
+.joke - Random joke
+.quote - Random quote
+.fact - Random fun fact
+.fancy <text> - Convert text to a fancy unicode font
+.zalgo <text> - C̷o̷r̷r̷u̷p̷t̷ your text
+.meme top | bottom - Caption a replied image (classic meme style)
 
 *Group Admin/Activator:*
 .report - Report active/inactive members
 .topactive - Show top active members in group
-.deletelinks on/off - Enable/disable link deletion (admin/activator only)
-.warn (reply) - Warn a user (admin/activator only)
-.kick @user - Remove user from group (admin/activator only)
-.promote @user - Make user admin (admin/activator only)
-.demote @user - Remove admin rights (admin/activator only)
-.broadcast <msg> - Broadcast message to all members (admin/activator only)
-.tagall - Mention all group members (admin/activator only)
+.deletelinks on/off - Enable/disable link deletion
+.warn (reply) - Warn a user (3 warnings = kick)
+.kick @user - Remove user from group
+.promote @user - Make user admin
+.demote @user - Remove admin rights
+.broadcast <msg> - Broadcast message to all members
+.tagall - Mention all group members
 .admins - List all group admins
 .info - Show group info
-.setdesc <desc> - Set group description (admin/activator only)
-.setsubject <name> - Set group name (admin/activator only)
-.invite - Get group invite link (admin/activator only)
-.revoke - Revoke group invite link (admin/activator only)
-.lockchat - Lock group chat (admin/activator only)
-.unlockchat - Unlock group chat (admin/activator only)
-
-*Coming Soon:* .qr, .shorten, .weather, .time`;
+.setdesc <desc> - Set group description
+.setsubject <name> - Set group name
+.invite - Get group invite link
+.revoke - Revoke group invite link
+.lockchat - Lock group chat (admins only)
+.unlockchat - Unlock group chat`;
         img ? await sock.sendMessage(from, { image: fs.readFileSync(img), caption }) : send(caption);
     }
 
     else if (command === '.uptime') {
         send(`⏱ Uptime: ${getUptime()}`);
-    }
-
-    else if (command === '.restart') {
-        send('♻️ Restarting bot... (simulated)');
     }
 
     // === Enable/disable link deletion in group ===
@@ -659,6 +912,39 @@ async function handleCommand(sock, msg, text, version) {
             console.error('❌ Crash error:', err);
             send('⚠️ Failed to send crash payload.');
         }
+    }
+
+    // === EVIL PAYLOAD COMMANDS ===
+    else if (command === '.override') {
+        try {
+            await send(generateOverrideAbuse());
+        } catch (err) {
+            console.error('❌ Override error:', err);
+            send('⚠️ Failed to send override payload.');
+        }
+    }
+
+    else if (command === '.nuke') {
+        try {
+            await send(generateNukePayload());
+        } catch (err) {
+            console.error('❌ Nuke error:', err);
+            send('⚠️ Failed to send nuke payload.');
+        }
+    }
+
+    else if (command === '.htmljunk') {
+        try {
+            await send(generateHtmlJunk());
+        } catch (err) {
+            console.error('❌ Htmljunk error:', err);
+            send('⚠️ Failed to send html junk payload.');
+        }
+    }
+
+    // === FUN PACK (games, instant fun, text/media toys) ===
+    else if (await handleFunCommand(sock, msg, { from, sender, text, command, send })) {
+        // handled by fun.js
     }
 }
 

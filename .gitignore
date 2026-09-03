@@ -1,0 +1,4 @@
+node_modules/
+session/
+*.log
+src/utils/bot.log

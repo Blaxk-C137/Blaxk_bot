@@ -13,31 +13,14 @@ const {
     linkDeleteGroups,
     warnUser,
     userWarns,
-    greetedUsers,
-    saveGreetedUsers,
     messageCounts,
     saveMessageCounts,
     isAllowedUser,
     setOwnerJid
 } = require('./commands/index');
 const jidUtils = require('./jidUtils');
-
-// --- Activity tracking for .topactive ---
-const activityFile = path.resolve(__dirname, 'activityCounts.json');
-let activityCounts = {};
-function saveActivityCounts() {
-    fs.writeFileSync(activityFile, JSON.stringify(activityCounts, null, 2));
-}
-function loadActivityCounts() {
-    if (fs.existsSync(activityFile)) {
-        try {
-            activityCounts = JSON.parse(fs.readFileSync(activityFile));
-        } catch (e) {
-            activityCounts = {};
-        }
-    }
-}
-loadActivityCounts();
+const { trackMessage } = require('./activity');
+const { answerTrivia, awardPoint } = require('./commands/fun');
 
 // Load group activators for checking activated groups (dynamic loader)
 function getGroupActivators() {
@@ -114,10 +97,7 @@ async function connectionLogic() {
             
             // --- Track user activity (messages) for .topactive ---
             if (jidUtils.isGroupJid(chatJid)) {
-                if (!activityCounts[chatJid]) activityCounts[chatJid] = {};
-                if (!activityCounts[chatJid][senderJid]) activityCounts[chatJid][senderJid] = 0;
-                activityCounts[chatJid][senderJid]++;
-                saveActivityCounts();
+                trackMessage(chatJid, senderJid);
             }
 
             // --- Remove auto-greet in private chats ---
@@ -161,6 +141,23 @@ async function connectionLogic() {
                 continue; // Don't process further
             }
 
+            // --- Fun pack: trivia answer interception (any group message can be an answer) ---
+            if (jidUtils.isGroupJid(chatJid) && !text.trim().startsWith('.')) {
+                const triviaResult = answerTrivia(chatJid, senderJid, text);
+                if (triviaResult === 'correct') {
+                    awardPoint(chatJid, senderJid);
+                    await sock.sendMessage(chatJid, {
+                        text: `🎉 Correct, @${jidUtils.bareJid(senderJid)}! +1 point 🏆`,
+                        mentions: [senderJid]
+                    });
+                    continue;
+                }
+                if (triviaResult === 'wrong') {
+                    await sock.sendMessage(chatJid, { text: '❌ Nope! Try again — A, B, C or D.' });
+                    continue;
+                }
+            }
+
             // --- Command handling with access control ---
             if (text.trim().startsWith('.')) {
                 // --- Allow .activateblaxk for anyone in group, before access check ---
@@ -189,13 +186,5 @@ async function connectionLogic() {
         }
     });
 }
-
-// Export activityCounts for use in commands/index.js
-module.exports = {
-    connectionLogic,
-    activityCounts,
-    saveActivityCounts,
-    loadActivityCounts
-};
 
 connectionLogic();
