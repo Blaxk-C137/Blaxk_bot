@@ -1,18 +1,30 @@
 {
-  "name": "whatsapp-bot",
-  "version": "2.0.0",
-  "description": "BlaxkBot — a WhatsApp group-management bot built on Baileys.",
-  "main": "src/bot.js",
+  "name": "blaxkbot",
+  "version": "3.0.0",
+  "description": "BlaxkBot — merged WhatsApp bot: group management, fun pack, AI, downloads. Runs fully offline; API keys optional.",
+  "main": "src/index.js",
+  "engines": { "node": ">=18.0.0" },
   "scripts": {
-    "start": "node src/bot.js"
+    "start": "node src/index.js",
+    "dev": "node src/index.js",
+    "test": "node --test tests/",
+    "pm2": "npx pm2 start ecosystem.config.js --env production"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.24",
-    "pino": "^9.6.0",
+    "@distube/ytdl-core": "^4.16.12",
+    "@google/genai": "^1.30.0",
+    "@whiskeysockets/baileys": "7.0.0-rc.9",
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0-rc.12",
+    "dotenv": "^17.2.3",
+    "node-fetch": "^3.3.2",
+    "pino": "^10.1.0",
     "qrcode-terminal": "^0.12.0",
-    "sharp": "^0.33.5",
-    "ws": "^8.18.3"
+    "sharp": "^0.34.5",
+    "wa-sticker-formatter": "^4.4.4",
+    "yt-search": "^2.13.1"
   },
+  "devDependencies": { "pm2": "^5.3.0" },
   "author": "Blaxk999",
   "license": "ISC"
 }
