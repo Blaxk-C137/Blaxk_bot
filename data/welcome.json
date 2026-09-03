@@ -1,0 +1,7 @@
+{
+  "g@g.us": {
+    "enabled": true,
+    "message": "Hey @user, welcome to {group}!",
+    "goodbye": "Bye @user!"
+  }
+}
