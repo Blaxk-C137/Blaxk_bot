@@ -1,6 +1,9 @@
 // commands.js — central command registry and dispatcher
+let current = null; // last created registry, for permission lookups
+
 function createRegistry() {
     const commands = new Map(); // name -> { description, handler, meta }
+    current = { commands }; // let permissions.js look up tiers
 
     function registerCommand(name, description, handler, meta = {}) {
         const fullMeta = {
@@ -57,4 +60,5 @@ function createRegistry() {
 
     return { commands, registerCommand, dispatch, buildHelp };
 }
-module.exports = { createRegistry };
+
+module.exports = { createRegistry, get current() { return current; } };
