@@ -11,7 +11,7 @@ const {
     startTrivia,
     answerTrivia,
     addScore
-} = require('../src/commands/fun');
+} = require('../src/features/fun');
 
 // === fancyText ===
 test('fancyText maps letters into the bold unicode range and keeps non-letters', () => {

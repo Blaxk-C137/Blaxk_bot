@@ -22,6 +22,20 @@ test('antilink command toggles and reports status', async () => {
     const storesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'blaxk-mod-'));
     const perm = createPermissions({ ownerNumber: '111@s.whatsapp.com', mode: 'public' }, storesDir);
 
+    // reset persisted state so repeated runs start from OFF
+    const linkStoreFile = path.resolve(__dirname, '../data/linkDeleteGroups.json');
+    if (fs.existsSync(linkStoreFile)) {
+        const data = JSON.parse(fs.readFileSync(linkStoreFile));
+        delete data['g@g.us'];
+        fs.writeFileSync(linkStoreFile, JSON.stringify(data, null, 2));
+    }
+    const wordStoreFile = path.resolve(__dirname, '../data/antiwords.json');
+    if (fs.existsSync(wordStoreFile)) {
+        const data = JSON.parse(fs.readFileSync(wordStoreFile));
+        delete data['g2@g.us'];
+        fs.writeFileSync(wordStoreFile, JSON.stringify(data, null, 2));
+    }
+
     const sent = [];
     const sock = { sendMessage: async (jid, c) => { sent.push(c); return { key: {} }; } };
     const msg = { key: { remoteJid: 'g@g.us', participant: '111@s.whatsapp.com', fromMe: false } };
