@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node src/index.js",
-    "test": "node --test tests/",
+    "test": "node --test tests/*.test.js",
     "pm2": "npx pm2 start ecosystem.config.js --env production"
   },
   "dependencies": {

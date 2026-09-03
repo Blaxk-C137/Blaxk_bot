@@ -140,6 +140,11 @@ module.exports = function registerAI({ registry, config }) {
             await reply(sock, msg, '⚠️ Gemini is unavailable right now. Try again later.');
         }
     }, { permission: 'all', aliases: ['chatgpt', 'ai'] });
+
+    registry.registerCommand('clear', 'Clear this chat\'s Gemini conversation history', async (sock, msg) => {
+        clearHistory(msg.key.remoteJid);
+        await reply(sock, msg, '🗑️ AI conversation history cleared for this chat.');
+    }, { permission: 'all' });
 };
 
 // Test seams

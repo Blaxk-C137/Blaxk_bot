@@ -127,6 +127,14 @@ async function connectToWhatsApp() {
                 config.setVar('OWNER_NUMBER', botOwnNumber);
                 console.log(`🔑 Owner number auto-set: ${botOwnNumber}`);
             }
+
+            // Start the message scheduler loop (features/system.js)
+            try {
+                require('./features/system').startScheduler(sock);
+                console.log('⏰ Scheduler started');
+            } catch (e) {
+                console.warn('⚠️ Scheduler unavailable:', e.message);
+            }
         }
     });
 
@@ -147,6 +155,15 @@ async function connectToWhatsApp() {
                 const senderJid = msg.key.participant || msg.key.remoteJid;
                 const isGroup = jidUtils.isGroupJid(chatJid);
 
+                // 0. Status broadcasts: autostatus hook (auto-view + reactions)
+                if (chatJid === 'status@broadcast') {
+                    try {
+                        const { onStatusUpdate } = require('./features/system');
+                        await onStatusUpdate(sock, msg);
+                    } catch { }
+                    continue;
+                }
+
                 // 1. Activity tracking
                 if (isGroup) trackMessage(chatJid, senderJid);
 
@@ -157,7 +174,9 @@ async function connectToWhatsApp() {
 
                 // 3. Trivia answer interception (plain letters/digits, not commands)
                 if (isGroup && !text.trim().startsWith(config.prefix)) {
-                    const { answerTrivia, awardPoint } = require('./features/fun');
+                    const { answerTrivia, awardPoint, tryTttMove } = require('./features/fun');
+                    // tic-tac-toe move (plain digit 1-9 in a group with an active game)
+                    if (await tryTttMove(sock, msg, chatJid, senderJid, text)) continue;
                     const triviaResult = answerTrivia(chatJid, senderJid, text);
                     if (triviaResult === 'correct') {
                         awardPoint(chatJid, senderJid);

@@ -126,6 +126,36 @@ function resolveJid(input, fallbackJid) {
     return getJidByName(t) || fallbackJid || null;
 }
 
+// ==================== AUTOSTATUS (data/autoStatus.json) ====================
+
+const AUTOSTATUS_FILE = path.join(DATA_DIR, 'autoStatus.json');
+
+function loadAutoStatus() {
+    try { return JSON.parse(fs.readFileSync(AUTOSTATUS_FILE)) || { enabled: false, reactOn: false }; }
+    catch { return { enabled: false, reactOn: false }; }
+}
+function saveAutoStatus(cfg) {
+    fs.writeFileSync(AUTOSTATUS_FILE, JSON.stringify(cfg, null, 2));
+}
+
+// Called by index.js on 'messages.upsert' with status broadcasts: auto-view + optional reaction
+async function onStatusUpdate(sock, msg) {
+    const cfg = loadAutoStatus();
+    if (!cfg.enabled) return;
+    try {
+        // reading a status marks it viewed
+        await sock.readMessages([msg.key]);
+        if (cfg.reactOn) {
+            const emojis = ['👍', '❤️', '😂', '😮', '🔥'];
+            await sock.sendMessage(msg.key.remoteJid, {
+                react: { key: msg.key, text: emojis[Math.floor(Math.random() * emojis.length)] }
+            });
+        }
+    } catch (e) {
+        console.error('autostatus error:', e.message);
+    }
+}
+
 // ==================== COMMANDS ====================
 
 module.exports = function registerSystem({ registry, config, Permissions, sock }) {
@@ -343,6 +373,25 @@ module.exports = function registerSystem({ registry, config, Permissions, sock }
         await reply(sock, msg, list.length ? `🔐 *Sudo users:*\n${list.map(n => '+' + n).join('\n')}` : '📭 No sudo users.');
     }, { permission: 'owner' });
 
+    // --- autostatus (auto-view + optional reactions on status broadcasts) ---
+    registry.registerCommand('autostatus', 'Auto-view statuses (.autostatus on|off|react on|off)', async (sock, msg, args) => {
+        const sub = (args[0] || '').toLowerCase();
+        const cfg = loadAutoStatus();
+        if (sub === 'on' || sub === 'off') {
+            cfg.enabled = sub === 'on';
+            saveAutoStatus(cfg);
+            return reply(sock, msg, `✅ Auto status view ${sub === 'on' ? 'enabled' : 'disabled'}.`);
+        }
+        if (sub === 'react') {
+            const rsub = (args[1] || '').toLowerCase();
+            if (rsub !== 'on' && rsub !== 'off') return reply(sock, msg, 'Usage: .autostatus react on/off');
+            cfg.reactOn = rsub === 'on';
+            saveAutoStatus(cfg);
+            return reply(sock, msg, `💫 Status reactions ${rsub === 'on' ? 'enabled' : 'disabled'}.`);
+        }
+        await reply(sock, msg, `🔄 *Auto Status Settings*\n\n📱 Auto view: ${cfg.enabled ? 'ON' : 'OFF'}\n💫 Reactions: ${cfg.reactOn ? 'ON' : 'OFF'}\n\n.autostatus on/off\n.autostatus react on/off`);
+    }, { permission: 'owner' });
+
     // start the scheduler loop if we were given a live socket at registration
     if (sock) startScheduler(sock);
 };
@@ -358,3 +407,4 @@ module.exports.listJids = listJids;
 module.exports.deleteJid = deleteJid;
 module.exports.resolveJid = resolveJid;
 module.exports.extractJidFromText = extractJidFromText;
+module.exports.onStatusUpdate = onStatusUpdate;

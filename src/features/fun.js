@@ -623,7 +623,7 @@ module.exports = function registerFun({ registry, config, Permissions }) {
             style = pick(Object.keys(FANCY_STYLES));
         }
         send(sock, msg, `✨ (${style})\n${fancyText(text, style)}`);
-    });
+    }, { aliases: ['fancytext'] });
 
     command('zalgo', 'Glitch your text with combining marks', async (sock, msg, args) => {
         const body = args.join(' ').trim();
