@@ -9,7 +9,9 @@ function createRegistry() {
         const fullMeta = {
             permission: meta.permission || 'all',
             groupOnly: !!meta.groupOnly,
-            aliases: meta.aliases || []
+            aliases: meta.aliases || [],
+            category: meta.category || 'other',
+            canonicalName: name
         };
         commands.set(name, { description, handler, meta: fullMeta });
         for (const alias of meta.aliases || []) {
@@ -44,21 +46,74 @@ function createRegistry() {
         return true;
     }
 
-    function buildHelp(prefix) {
-        const byPerm = { all: [], admin: [], activator: [], owner: [] };
+    function buildHelp(prefix, query = '') {
+        if (query) {
+            const name = query.trim();
+            const cmd = commands.get((name.startsWith(prefix) ? name.slice(prefix.length) : name).toLowerCase());
+            if (!cmd) return `❓ Unknown command. Use ${prefix}menu to see the command list.`;
+            const access = { all: 'Everyone', admin: 'Admins / group activator', activator: 'Group activator', owner: 'Owner / sudo' };
+            return [
+                `*${prefix}${cmd.meta.canonicalName}*`,
+                '',
+                cmd.description.replace(/\.([a-z][a-z0-9]*)\b/gi, (_, command) => `${prefix}${command}`),
+                '',
+                `Access: ${access[cmd.meta.permission] || cmd.meta.permission}`,
+                ...(cmd.meta.groupOnly ? ['Chat: Groups only'] : []),
+                ...(cmd.meta.aliases.length ? [`Aliases: ${cmd.meta.aliases.map(alias => `${prefix}${alias}`).join(', ')}`] : [])
+            ].join('\n');
+        }
+        const categories = new Map([
+            ['core', '🤖 Essentials'], ['group', '👥 Group management'],
+            ['moderation', '🛡️ Moderation'], ['welcome', '👋 Welcome & activity'],
+            ['sticker', '🎨 Stickers & media'], ['downloads', '📥 Downloads'],
+            ['ai', '💬 AI chat'], ['recommend', '🎬 Movies, anime & football'],
+            ['fun', '🎮 Fun & games'], ['sims', '🧪 Simulations'],
+            ['system', '⚙️ Settings & tools'], ['other', '🧩 Other commands']
+        ]);
+        const grouped = new Map();
+        let count = 0;
         for (const [name, cmd] of commands) {
             if (cmd.meta.isAlias) continue;
-            byPerm[cmd.meta.permission]?.push(`${prefix}${name} - ${cmd.description}`);
+            if (!grouped.has(cmd.meta.category)) grouped.set(cmd.meta.category, []);
+            grouped.get(cmd.meta.category).push(`${prefix}${name}`);
+            count++;
         }
-        const section = (title, list) => `\n${title}\n${list.length ? list.join('\n') : '—'}`;
-        return '*🛠 BlaxkBot Command List:*' +
-            section('*Everyone:*', byPerm.all) +
-            section('*Group Admin/Activator:*', byPerm.admin) +
-            section('*Activator:*', byPerm.activator) +
-            section('*Owner:*', byPerm.owner);
+        const sections = [];
+        for (const category of new Set([...categories.keys(), ...grouped.keys()])) {
+            const list = grouped.get(category);
+            if (!list?.length) continue;
+            const rows = [];
+            let row = '';
+            for (const name of list.sort()) {
+                if (row && row.length + name.length + 3 > 46) {
+                    rows.push(row);
+                    row = '';
+                }
+                row += (row ? ' · ' : '') + name;
+            }
+            if (row) rows.push(row);
+            sections.push(`*${categories.get(category) || category}*\n${rows.join('\n')}`);
+        }
+        return [
+            '*🤖 BLAXKBOT*',
+            `${count} commands · Prefix: ${prefix}`,
+            '──────────────', '',
+            ...sections.flatMap(section => [section, '']),
+            '──────────────',
+            `Details & aliases: ${prefix}help <command>`,
+            'Some commands require group, admin or owner access.'
+        ].join('\n');
     }
 
-    return { commands, registerCommand, dispatch, buildHelp };
+    const registry = { commands, registerCommand, dispatch, buildHelp, withCategory };
+    function withCategory(category) {
+        return {
+            ...registry,
+            registerCommand: (name, description, handler, meta = {}) =>
+                registerCommand(name, description, handler, { category, ...meta })
+        };
+    }
+    return registry;
 }
 
 module.exports = { createRegistry, get current() { return current; } };

@@ -5,27 +5,37 @@ const os = require('os');
 const sharp = require('sharp');
 const { execFileSync } = require('child_process');
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { getEmojiMixUrl } = require('../emojiKitchen');
+const { unwrapMessage } = require('../messageUtils');
+
+function getQuotedMessage(msg) {
+    const message = unwrapMessage(msg.message);
+    const context = Object.values(message || {}).find(content => content?.contextInfo?.quotedMessage)?.contextInfo;
+    return unwrapMessage(context?.quotedMessage) || null;
+}
+
+function parseEmojiPair(input) {
+    const raw = String(input || '').trim();
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    const parts = raw.includes('+') ? raw.split('+').map(part => part.trim()) :
+        [...segmenter.segment(raw)].map(part => part.segment).filter(part => part.trim());
+    const emoji = /^(?:\p{Extended_Pictographic}[\uFE0E\uFE0F]?\p{Emoji_Modifier}?(?:\u200D\p{Extended_Pictographic}[\uFE0E\uFE0F]?\p{Emoji_Modifier}?)*|\p{Regional_Indicator}{2}|[0-9#*]\uFE0F?\u20E3)$/u;
+    return parts.length === 2 && parts.every(part => emoji.test(part)) ? parts : null;
+}
 
 async function downloadQuoted(msg, type) {
-    // unwrap view-once first
-    let quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+    const quoted = getQuotedMessage(msg);
     if (!quoted) return null;
-    if (quoted?.viewOnceMessage?.message) quoted = quoted.viewOnceMessage.message;
-    if (quoted?.viewOnceMessageV2?.message) quoted = quoted.viewOnceMessageV2.message;
-    if (quoted?.ephemeralMessage?.message) quoted = quoted.ephemeralMessage.message;
     const content = quoted?.[type + 'Message'];
     if (!content) return null;
     const stream = await downloadContentFromMessage(content, type);
-    let buffer = Buffer.from([]);
-    for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-    return buffer;
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    return Buffer.concat(chunks);
 }
 
 function hasQuotedType(msg, type) {
-    let quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-    if (!quoted) return false;
-    if (quoted?.viewOnceMessage?.message) quoted = quoted.viewOnceMessage.message;
-    if (quoted?.viewOnceMessageV2?.message) quoted = quoted.viewOnceMessageV2.message;
+    const quoted = getQuotedMessage(msg);
     return !!quoted?.[type + 'Message'];
 }
 
@@ -51,7 +61,7 @@ async function createStickerBuffer(inputBuffer, { pack = 'BlaxkBot', author = 'B
     // Primary: wa-sticker-formatter (adds metadata, works for images + videos)
     try {
         const { Sticker, StickerTypes } = require('wa-sticker-formatter');
-        const sticker = new Sticker(inputBuffer, { pack, author, type: StickerTypes.DEFAULT, quality: 80 });
+        const sticker = new Sticker(inputBuffer, { pack, author, type: StickerTypes.FULL, quality: 80 });
         return await sticker.toBuffer();
     } catch { /* fall through to sharp */ }
     // Fallback: plain sharp webp resize
@@ -62,6 +72,7 @@ async function createStickerBuffer(inputBuffer, { pack = 'BlaxkBot', author = 'B
 }
 
 module.exports = function registerSticker({ registry, config }) {
+    registry = registry.withCategory('sticker');
     const reply = (sock, msg, text) => sock.sendMessage(msg.key.remoteJid, { text });
 
     // === STICKER (reply to image/video) ===
@@ -165,25 +176,21 @@ module.exports = function registerSticker({ registry, config }) {
         }
     }, { permission: 'all' });
 
-    // === EMOJIMIX (two emojis -> sticker, external API) ===
+    // === EMOJIMIX (two emojis -> Emoji Kitchen sticker) ===
     registry.registerCommand('emojimix', 'Mix two emojis into a sticker (.emojimix 😅+😍)', async (sock, msg, args) => {
         const from = msg.key.remoteJid;
-        const raw = args.join('').replace(/\s+/g, '');
-        const match = raw.match(/(\p{Extended_Pictographic}|\p{Emoji_Presentation})\s*\+\s*(\p{Extended_Pictographic}|\p{Emoji_Presentation})/u);
-        if (!match) return reply(sock, msg, 'Usage: .emojimix 😅+😍 (two emojis joined by +)');
-        const [_, e1, e2] = match;
+        const pair = parseEmojiPair(args.join(' '));
+        if (!pair) return reply(sock, msg, `Usage: ${config.prefix}emojimix 😅+😍 (send two emojis)`);
         try {
             const axios = require('axios');
-            const url = `https://api.siputzx.my.id/api/v1/emojimix?emoji1=${encodeURIComponent(e1)}&emoji2=${encodeURIComponent(e2)}`;
-            const res = await axios.get(url, { timeout: 15000 });
-            const imageUrl = res.data?.data?.url;
-            if (!imageUrl) return reply(sock, msg, '❌ No mix found for those emojis.');
-            const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 15000 });
+            const imageUrl = getEmojiMixUrl(...pair);
+            if (!imageUrl) return reply(sock, msg, '❌ Emoji Kitchen has no mix for that pair. Try 😅+😍 or ❤️+🔥.');
+            const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 15000, maxContentLength: 5 * 1024 * 1024 });
             const webp = await createStickerBuffer(Buffer.from(imgRes.data));
             await sock.sendMessage(from, { sticker: webp });
         } catch (err) {
             console.error('❌ Emojimix error:', err.message);
-            await reply(sock, msg, '⚠️ Emojimix failed (external API unavailable).');
+            await reply(sock, msg, '⚠️ Could not download the emoji mix. Please try again shortly.');
         }
     }, { permission: 'all' });
 
@@ -277,3 +284,5 @@ module.exports = function registerSticker({ registry, config }) {
 
 module.exports.createStickerBuffer = createStickerBuffer;
 module.exports.videoToAnimatedSticker = videoToAnimatedSticker;
+module.exports.parseEmojiPair = parseEmojiPair;
+module.exports.getQuotedMessage = getQuotedMessage;

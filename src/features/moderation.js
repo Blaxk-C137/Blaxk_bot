@@ -47,6 +47,7 @@ function warnTarget(groupJid, targetJid) {
 }
 
 module.exports = function registerModeration({ registry, config, Permissions }) {
+    registry = registry.withCategory('moderation');
     const reply = (sock, msg, text, mentions) =>
         sock.sendMessage(msg.key.remoteJid, { text, ...(mentions ? { mentions } : {}) });
 

@@ -25,26 +25,27 @@ function getUptime() {
     return `${day}d ${hr}h ${min}m ${sec}s`;
 }
 
-// Latency: measure round-trip of an echo send (mocked in smoke tests)
-async function measureLatency(sock, jid) {
+// Measure the time for WhatsApp to acknowledge a reaction to the command.
+async function measureLatency(sock, msg) {
     const start = Date.now();
-    await sock.sendMessage(jid, { text: '' }); // may fail silently; time anyway
+    await sock.sendMessage(msg.key.remoteJid, { react: { text: '⚡', key: msg.key } });
     return Date.now() - start;
 }
 
-const BOT_OWNER = 'Blaxk999';
+const BOT_OWNER = 'Blaxk';
 const BOT_CREATED = '03 July 2025';
 const BOT_QUOTE = 'Wake Up Reality! BlaxkBot Conquers All';
 const REPO_URL = 'https://github.com/black999-ng/Blaxk_bot';
 
 module.exports = function registerCore({ registry, config }) {
+    registry = registry.withCategory('core');
     const reply = (sock, msg, text) => sock.sendMessage(msg.key.remoteJid, { text });
 
     registry.registerCommand('ping', 'Show bot status and info', async (sock, msg) => {
-        const latency = await measureLatency(sock, msg.key.remoteJid).catch(() => 'n/a');
+        const latency = await measureLatency(sock, msg).then(ms => `${ms}ms`).catch(() => 'unavailable');
         const caption =
             `🤖 *BlaxkBot is alive!*\n` +
-            `⚡ Latency: ${latency}ms\n` +
+            `⚡ Latency: ${latency}\n` +
             `⏱ Uptime: ${getUptime()}\n` +
             `👑 Owner: ${BOT_OWNER}\n` +
             `📅 Created: ${BOT_CREATED}\n` +
@@ -54,17 +55,19 @@ module.exports = function registerCore({ registry, config }) {
             .map(f => path.join(__dirname, '..', f))
             .filter(f => fs.existsSync(f));
         if (images.length > 0) {
-            await sock.sendMessage(msg.key.remoteJid, {
-                image: fs.readFileSync(images[Math.floor(Math.random() * images.length)]),
-                caption
-            });
-        } else {
-            await reply(sock, msg, caption);
+            try {
+                await sock.sendMessage(msg.key.remoteJid, {
+                    image: fs.readFileSync(images[Math.floor(Math.random() * images.length)]),
+                    caption
+                });
+                return;
+            } catch { /* Fall back to text if a banner cannot be sent. */ }
         }
+        await reply(sock, msg, caption);
     }, { permission: 'all' });
 
-    registry.registerCommand('help', 'Show this help message', async (sock, msg) => {
-        await reply(sock, msg, registry.buildHelp(config.prefix));
+    registry.registerCommand('help', 'Show the menu or command details (.help <command>)', async (sock, msg, args) => {
+        await reply(sock, msg, registry.buildHelp(config.prefix, args[0]));
     }, { permission: 'all', aliases: ['menu'] });
 
     registry.registerCommand('uptime', 'Show bot uptime', async (sock, msg) => {

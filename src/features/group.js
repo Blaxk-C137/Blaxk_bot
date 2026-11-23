@@ -39,6 +39,7 @@ function resolveTarget(msg, args) {
 const muteTimers = new Map(); // groupJid -> timeout
 
 module.exports = function registerGroup({ registry, config, Permissions }) {
+    registry = registry.withCategory('group');
     const reply = (sock, msg, text, mentions) =>
         sock.sendMessage(msg.key.remoteJid, { text, ...(mentions ? { mentions } : {}) });
     const groupJid = (msg) => msg.key.remoteJid;

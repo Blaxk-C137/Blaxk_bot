@@ -104,6 +104,7 @@ async function askGemini(config, jid, prompt, { maxTurns = 10 } = {}) {
 }
 
 module.exports = function registerAI({ registry, config }) {
+    registry = registry.withCategory('ai');
     const reply = (sock, msg, text) => sock.sendMessage(msg.key.remoteJid, { text });
 
     registry.registerCommand('gemini', 'Chat with Gemini AI (.gemini <prompt> | .gemini mode <mode> | .gemini clear | .gemini modes)', async (sock, msg, args) => {

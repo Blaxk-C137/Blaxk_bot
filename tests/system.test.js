@@ -112,11 +112,54 @@ test('sims payload generators produce the classic payloads', () => {
     const junk = sims.generateHtmlJunk();
     assert.ok(junk.includes('<div'));
     assert.ok(junk.includes('marquee'));
+    assert.ok(junk.length < 10000, 'HTML junk must fit in a small message');
 
     const crash = sims.generateCrashPayload();
     // 👹 is a surrogate pair: 20000 UTF-16 units = 10000 emoji
     assert.strictEqual([...crash].length, 10000);
     assert.ok((crash.match(/👹/g) || []).length === 10000);
+});
+
+test('schedule command consumes the entire time expression and preserves message text', async () => {
+    const { createRegistry } = require('../src/commands');
+    const reg = createRegistry();
+    system({ registry: reg, config, Permissions: {} });
+    fs.writeFileSync(schedFile, JSON.stringify({ items: [] }));
+    const sock = { sendMessage: async () => {} };
+    const msg = { key: { remoteJid: 'g@g.us' } };
+    const before = Date.now();
+    await reg.dispatch(sock, msg, '.schedule in 10m hello future');
+    await reg.dispatch(sock, msg, '.schedule 2030-06-15 08:30 birthday reminder');
+    const items = system.listSchedules();
+    assert.strictEqual(items.length, 2);
+    assert.strictEqual(items[0].text, 'hello future');
+    assert.ok(items[0].timestamp >= before + 600000);
+    assert.strictEqual(items[1].text, 'birthday reminder');
+    assert.strictEqual(new Date(items[1].timestamp).getHours(), 8);
+});
+
+test('schedule parser rejects rolled-over dates and invalid time values', () => {
+    for (const input of ['25:00', '12:60', '2030-02-30 08:30', '2030-13-01 08:30', 'in 0s', 'in 999999999999999999999d']) {
+        assert.strictEqual(system.parseScheduleTime(input), null, input);
+    }
+});
+
+test('sudo commands persist privileges through the real permissions store', async () => {
+    const { createRegistry } = require('../src/commands');
+    const createPermissions = require('../src/permissions');
+    const perm = createPermissions({ mode: 'public', ownerNumber: '2348012345678' }, tmpDir);
+    const reg = createRegistry();
+    system({ registry: reg, config, Permissions: perm });
+    const sent = [];
+    const sock = { sendMessage: async (jid, content) => sent.push(content) };
+    const msg = { key: { remoteJid: '2348012345678@s.whatsapp.net', fromMe: true } };
+    await reg.dispatch(sock, msg, '.setsudo 2348098765432');
+    assert.ok(perm.isSudo('2348098765432:5@s.whatsapp.net'));
+    await reg.dispatch(sock, msg, '.setsudo 2348098765432');
+    await reg.dispatch(sock, msg, '.seesudo');
+    assert.strictEqual((sent.at(-1).text.match(/2348098765432/g) || []).length, 1);
+    await reg.dispatch(sock, msg, '.delsudo 2348098765432');
+    assert.ok(!perm.isSudo('2348098765432@s.whatsapp.net'));
 });
 
 // restore the real overrides file after the suite

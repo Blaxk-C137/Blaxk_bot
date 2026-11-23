@@ -454,6 +454,7 @@ async function runTextmaker(sock, from, effect, text) {
 
 // === REGISTRATION (registry module interface) ===
 module.exports = function registerFun({ registry, config, Permissions }) {
+    registry = registry.withCategory('fun');
     const send = (sock, msg, text, opts = {}) =>
         sock.sendMessage(msg.key.remoteJid, { text, ...(opts.mentions ? { mentions: opts.mentions } : {}) });
 

@@ -82,6 +82,7 @@ async function onParticipantsUpdate(sock, update) {
 }
 
 module.exports = function registerWelcome({ registry, config, Permissions }) {
+    registry = registry.withCategory('welcome');
     const reply = (sock, msg, text, mentions) =>
         sock.sendMessage(msg.key.remoteJid, { text, ...(mentions ? { mentions } : {}) });
 

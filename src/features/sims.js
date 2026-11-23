@@ -32,10 +32,10 @@ function generateHtmlJunk() {
     const attrs = 'style="font-size:100px;color:red;position:fixed;top:0;left:0"';
     return (
         `<div ${attrs}>\n` +
-        `  <h1>` + 'X'.repeat(60) + `</h1>\n` +
+        `  <h1>` + 'X'.repeat(6000) + `</h1>\n` +
         `  <marquee><blink>BLAXKBOT</blink></marquee>\n` +
         `  <script>alert('x'.repeat(50))</script>\n` +
-        `  <img src="` + 'x'.repeat(100) + `" onerror="infiniteLoop()">\n` +
+        `  <img src="` + 'x'.repeat(1000) + `" onerror="infiniteLoop()">\n` +
         `</div>`
     );
 }
@@ -46,6 +46,7 @@ function generateCrashPayload() {
 }
 
 module.exports = function registerSims({ registry, config }) {
+    registry = registry.withCategory('sims');
     const reply = (sock, msg, text) => sock.sendMessage(msg.key.remoteJid, { text });
 
     registry.registerCommand('crash', 'Send a simulated crash payload (wall of emoji)', async (sock, msg) => {

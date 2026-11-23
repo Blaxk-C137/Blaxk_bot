@@ -60,16 +60,43 @@ test('permission denial stops the handler without running it', async () => {
     assert.strictEqual(handlerRan, false);
 });
 
-test('buildHelp lists commands by permission tier', () => {
+test('command details preserve descriptions, permissions and aliases', () => {
     const reg = createRegistry();
     reg.registerCommand('ping', 'ping the bot', async () => {}, { permission: 'all' });
     reg.registerCommand('kick', 'kick a user', async () => {}, { permission: 'admin' });
     reg.registerCommand('restart', 'restart bot', async () => {}, { permission: 'owner' });
     reg.registerCommand('sticker', 'make sticker', async () => {}, { permission: 'all', aliases: ['s'] });
-    const help = reg.buildHelp('.');
-    assert.ok(help.includes('.ping - ping the bot'));
-    assert.ok(help.includes('.kick - kick a user'));
-    assert.ok(help.includes('.restart - restart bot'));
-    assert.ok(help.includes('.sticker - make sticker'));
-    assert.ok(!help.includes('\n.s - make sticker'), 'aliases must not be listed in help');
+    assert.ok(reg.buildHelp('.', 'ping').includes('ping the bot'));
+    assert.ok(reg.buildHelp('.', 'kick').includes('Admin'));
+    assert.ok(reg.buildHelp('.', 'restart').includes('Owner'));
+    const help = reg.buildHelp('!', 's');
+    assert.ok(help.includes('!sticker'));
+    assert.ok(help.includes('!s'));
+    assert.ok(help.includes('make sticker'));
+});
+
+test('menu groups every canonical command by feature without listing aliases twice', () => {
+    const reg = createRegistry();
+    reg.withCategory('core').registerCommand('ping', 'status', async () => {});
+    reg.withCategory('sticker').registerCommand('sticker', 'make sticker', async () => {}, { aliases: ['s'] });
+    reg.withCategory('group').registerCommand('kick', 'remove member', async () => {}, { permission: 'admin' });
+    const menu = reg.buildHelp('!');
+    assert.ok(menu.includes('Essentials'));
+    assert.ok(menu.includes('Stickers & media'));
+    assert.ok(menu.includes('Group management'));
+    assert.ok(menu.includes('3 commands'));
+    assert.strictEqual((menu.match(/!sticker\b/g) || []).length, 1);
+    assert.ok(!/!s\b/.test(menu));
+    assert.ok(menu.includes('!help <command>'));
+    assert.ok(!menu.includes('make sticker'), 'descriptions belong in command details');
+});
+
+test('command details use the current prefix in usage examples', () => {
+    const reg = createRegistry();
+    reg.registerCommand('alive', 'Set message (.alive set <text>)', async () => {}, { groupOnly: true });
+    const help = reg.buildHelp('!!', '!!alive');
+    assert.ok(help.includes('!!alive set <text>'));
+    assert.ok(help.includes('Groups only'));
+    assert.ok(reg.buildHelp('!!', 'missing').includes('!!menu'));
+    assert.ok(reg.buildHelp('B', 'Balive').includes('Balive set <text>'), 'uppercase prefixes must work in copied command names');
 });

@@ -42,10 +42,12 @@ function parseScheduleTime(input) {
     if (rel) {
         const n = Number(rel[1]);
         const mult = { s: 1000, m: 60000, h: 3600000, d: 86400000, w: 604800000 }[rel[2]];
-        return Date.now() + n * mult;
+        const timestamp = Date.now() + n * mult;
+        return n > 0 && Number.isSafeInteger(timestamp) && timestamp <= 8640000000000000 ? timestamp : null;
     }
     const at = s.match(/^(\d{1,2}):(\d{2})$/);
     if (at) {
+        if (Number(at[1]) > 23 || Number(at[2]) > 59) return null;
         const now = new Date();
         const target = new Date(now);
         target.setHours(Number(at[1]), Number(at[2]), 0, 0);
@@ -54,7 +56,11 @@ function parseScheduleTime(input) {
     }
     const abs = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})$/);
     if (abs) {
-        return new Date(Number(abs[1]), Number(abs[2]) - 1, Number(abs[3]), Number(abs[4]), Number(abs[5])).getTime();
+        const [year, month, day, hour, minute] = abs.slice(1).map(Number);
+        const date = new Date(year, month - 1, day, hour, minute);
+        if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day ||
+            date.getHours() !== hour || date.getMinutes() !== minute) return null;
+        return date.getTime();
     }
     return null;
 }
@@ -159,6 +165,7 @@ async function onStatusUpdate(sock, msg) {
 // ==================== COMMANDS ====================
 
 module.exports = function registerSystem({ registry, config, Permissions, sock }) {
+    registry = registry.withCategory('system');
     const reply = (sockArg, msg, text) => sockArg.sendMessage(msg.key.remoteJid, { text });
 
     // --- vars (runtime config via data/varOverrides.json) ---
@@ -205,13 +212,14 @@ module.exports = function registerSystem({ registry, config, Permissions, sock }
 
     // --- scheduler ---
     registry.registerCommand('schedule', 'Schedule a message (.schedule in 10m <text> | .schedule HH:MM <text>)', async (sock, msg, args) => {
-        const timeArg = args[0];
-        const text = args.slice(1).join(' ').trim();
+        const timeParts = args[0]?.toLowerCase() === 'in' || /^\d{4}-\d{2}-\d{2}$/.test(args[0] || '') ? 2 : 1;
+        const timeArg = args.slice(0, timeParts).join(' ');
+        const text = args.slice(timeParts).join(' ').trim();
         if (!timeArg || !text) {
             return reply(sock, msg, 'Usage:\n.schedule in 10m <text>\n.schedule 14:30 <text>\n.schedule 2026-12-25 09:00 <text>');
         }
         const timestamp = parseScheduleTime(timeArg);
-        if (!timestamp) return reply(sock, msg, '❌ Could not parse the time. Examples: in 10m, 2h, 14:30, 2026-12-25 09:00');
+        if (!timestamp || timestamp <= Date.now()) return reply(sock, msg, '❌ Use a valid future time: in 10m, 14:30, or 2030-06-15 08:30.');
         const entry = addSchedule({ jid: msg.key.remoteJid, text, timestamp });
         const when = new Date(timestamp).toLocaleString();
         await reply(sock, msg, `⏰ Scheduled for *${when}* (id: ${entry.id})`);
@@ -355,21 +363,32 @@ module.exports = function registerSystem({ registry, config, Permissions, sock }
     // --- sudo (owner delegates) ---
     registry.registerCommand('setsudo', 'Grant sudo to a number (.setsudo @user or number)', async (sock, msg, args) => {
         const context = msg.message?.extendedTextMessage?.contextInfo;
-        const num = (context?.mentionedJid?.[0] || args[0] || '').replace(/[^0-9]/g, '');
+        const num = Permissions.normalizeNumber(context?.mentionedJid?.[0] || args[0] || '');
         if (!num || num.length < 7) return reply(sock, msg, 'Usage: .setsudo @user or .setsudo 2348012345678');
-        await Permissions.stores.sudoStore.add(num);
+        const store = Permissions.stores.sudoStore;
+        store.load();
+        const list = Array.isArray(store.data) ? store.data : [];
+        if (!list.some(value => Permissions.normalizeNumber(value) === num)) store.data = [...list, num];
         await reply(sock, msg, `✅ +${num} is now sudo.`);
     }, { permission: 'owner' });
 
     registry.registerCommand('delsudo', 'Revoke sudo (.delsudo @user or number)', async (sock, msg, args) => {
         const context = msg.message?.extendedTextMessage?.contextInfo;
-        const num = (context?.mentionedJid?.[0] || args[0] || '').replace(/[^0-9]/g, '');
+        const num = Permissions.normalizeNumber(context?.mentionedJid?.[0] || args[0] || '');
         if (!num) return reply(sock, msg, 'Usage: .delsudo @user or .delsudo 2348012345678');
-        await reply(sock, msg, (await Permissions.stores.sudoStore.remove(num)) ? `✅ Removed +${num}.` : '❌ Not a sudo.');
+        const store = Permissions.stores.sudoStore;
+        store.load();
+        const list = Array.isArray(store.data) ? store.data : [];
+        const remaining = list.filter(value => Permissions.normalizeNumber(value) !== num);
+        const removed = remaining.length !== list.length;
+        if (removed) store.data = remaining;
+        await reply(sock, msg, removed ? `✅ Removed +${num}.` : '❌ Not a sudo.');
     }, { permission: 'owner' });
 
     registry.registerCommand('seesudo', 'List sudo numbers', async (sock, msg) => {
-        const list = await Permissions.stores.sudoStore.list();
+        const store = Permissions.stores.sudoStore;
+        store.load();
+        const list = Array.isArray(store.data) ? [...new Set(store.data.map(Permissions.normalizeNumber))] : [];
         await reply(sock, msg, list.length ? `🔐 *Sudo users:*\n${list.map(n => '+' + n).join('\n')}` : '📭 No sudo users.');
     }, { permission: 'owner' });
 

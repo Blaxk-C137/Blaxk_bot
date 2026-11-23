@@ -14,6 +14,7 @@ const { createRegistry } = require('./commands');
 const createPermissions = require('./permissions');
 const jidUtils = require('./jidUtils');
 const { trackMessage } = require('./activity');
+const { getMessageText } = require('./messageUtils');
 
 const DATA_DIR = require('path').resolve(__dirname, '../data');
 require('fs').mkdirSync(DATA_DIR, { recursive: true });
@@ -144,12 +145,7 @@ async function connectToWhatsApp() {
             try {
                 if (!msg.message) continue;
 
-                const text =
-                    msg.message.conversation ||
-                    msg.message.extendedTextMessage?.text ||
-                    msg.message.imageMessage?.caption ||
-                    msg.message.videoMessage?.caption ||
-                    '';
+                const text = getMessageText(msg.message);
 
                 const chatJid = msg.key.remoteJid;
                 const senderJid = msg.key.participant || msg.key.remoteJid;

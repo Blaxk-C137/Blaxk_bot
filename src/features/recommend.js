@@ -179,6 +179,7 @@ function fmtFixture(f) {
 }
 
 module.exports = function registerRecommend({ registry, config }) {
+    registry = registry.withCategory('recommend');
     const reply = (sock, msg, text) => sock.sendMessage(msg.key.remoteJid, { text });
     const tmdbKey = () => config.tmdbApiKey;
     const footballKey = () => config.footballApiKey;

@@ -79,6 +79,7 @@ async function apkMirrorSearch(query) {
 }
 
 module.exports = function registerDownloads({ registry, config }) {
+    registry = registry.withCategory('downloads');
     const reply = (sock, msg, text) => sock.sendMessage(msg.key.remoteJid, { text });
 
     registry.registerCommand('song', 'Download a song from YouTube (.song <query or url>)', async (sock, msg, args) => {

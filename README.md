@@ -48,7 +48,7 @@ Every feature module exports `register({ registry, config, Permissions })` and r
 
 ## Commands (120+)
 
-`.help` in chat shows everything live. Highlights:
+`.menu` (or `.help`) shows a compact menu grouped by feature. Use `.help <command>` for the description, aliases and required access, for example `.help emojimix`. Both follow the current command prefix. Highlights:
 
 | Area | Commands |
 |---|---|
@@ -62,6 +62,8 @@ Every feature module exports `register({ registry, config, Permissions })` and r
 | **Fun** | truth, dare, wyr, trivia (easy/medium/hard), tictactoe/ttt, roulette, 8ball, flip, dice, rate, ship, pick, joke, quote, fact, flirt, fancy (30+ styles), zalgo, textmaker (17 effects) |
 | **Sims** | crash, bugbot, override, nuke, htmljunk |
 | **Owner** | mode, prefix, ownernumber, setvar/seevar, schedule/schedules/schedulecancel, wapresence, autostatus, pm2status, restart, update, block, del, setsudo/delsudo/seesudo, savejid/getjid/deljid |
+
+`.emojimix 😅+😍` uses a bundled Emoji Kitchen lookup and downloads the sticker artwork from Google's CDN. Spaces or two adjacent emojis also work; unsupported combinations get a clear reply. See [the catalog notes](data/emojiKitchen.README.md) for sources and refresh instructions.
 
 ## Optional API keys (.env)
 
@@ -104,7 +106,7 @@ pm2 save
 npm test
 ```
 
-62 unit tests across registry, permissions, config, moderation, fun pack (tictactoe win detection, trivia difficulty, fancy styles), scheduler parsing, and payload generators.
+Unit tests cover registry/menu, permissions, config, wrapped messages, stickers and emoji mixes, moderation, fun pack, scheduler parsing, and payload generators. Some existing tests write to `data/`; run the suite in an isolated copy when using a live bot checkout.
 
 ## Project layout notes
 
